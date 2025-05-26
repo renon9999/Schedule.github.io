@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>日課グラフ & ポモドーロタイマー</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 1rem;
+      max-width: 900px;
+      margin: auto;
+    }
+    textarea {
+      width: 100%;
+      height: 120px;
+      font-size: 1rem;
+      margin-bottom: 1rem;
+    }
+    button {
+      padding: 0.5rem 1rem;
+      font-size: 1rem;
+      margin: 0.3rem;
+    }
+    .layout {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      justify-content: space-between;
+    }
+    .left, .right {
+      flex: 1 1 300px;
+      min-width: 280px;
+    }
+    canvas {
+      max-width: 100%;
+    }
+    .timer-box {
+      padding: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+    }
+    #timerDisplay {
+      font-size: 2rem;
+      text-align: center;
+      margin-bottom: 0.5rem;
+    }
+    #status {
+      text-align: center;
+      margin-bottom: 1rem;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h2>日課グラフジェネレータ</h2>
+  <p>形式例：<code>5:00 睡眠</code> のように記入</p>
+  <textarea id="scheduleInput">5:00 睡眠
+12:00 ご飯と家事
+14:00 スラック返信
+16:00 面接
+17:30 スラック返信
+18:30 MTG</textarea>
+  <br />
+  <button onclick="generateChart()">グラフ生成</button>
+
+  <div class="layout">
+    <div class="left">
+      <canvas id="pieChart"></canvas>
+    </div>
+
+    <div class="right timer-box">
+      <h2>ポモドーロタイマー</h2>
+      <div id="status">待機中</div>
+      <div id="timerDisplay">25:00</div>
+      <div style="text-align:center;">
+        <button onclick="startTimer()">スタート</button>
+        <button onclick="stopTimer()">ストップ</button>
+        <button onclick="resetTimer()">リセット</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- グラフ処理 ---
+    function parseTime(t) {
+      if (t === "24:00") return 24 * 60;
+      const [h, m] = t.split(":").map(Number);
+      return h * 60 + (m || 0);
+    }
+
+    function generateChart() {
+      const input = document.getElementById("scheduleInput").value.trim().split("\n");
+      const times = [];
+      const labels = [];
+
+      for (let line of input) {
+        if (!line.trim()) continue;
+        const [time, ...rest] = line.trim().split(" ");
+        times.push(parseTime(time));
+        labels.push(rest.join(" "));
+      }
+
+      times.push(parseTime("24:00"));
+
+      const durations = [];
+      const newLabels = [];
+
+      for (let i = 0; i < labels.length; i++) {
+        const duration = times[i + 1] - times[i];
+        durations.push(duration);
+        newLabels.push(`${labels[i]}（${Math.floor(duration / 60)}h${duration % 60 ? (duration % 60) + 'm' : ''}）`);
+      }
+
+      const ctx = document.getElementById("pieChart").getContext("2d");
+      if (window.chart) window.chart.destroy();
+      window.chart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+          labels: newLabels,
+          datasets: [{
+            data: durations,
+            backgroundColor: durations.map((_, i) => `hsl(${i * 60 % 360}, 70%, 70%)`)
+          }]
+        },
+        options: {
+          plugins: {
+            legend: { position: 'bottom' },
+            datalabels: {
+              formatter: (value, ctx) => {
+                return ctx.chart.data.labels[ctx.dataIndex];
+              },
+              color: '#000',
+              font: { weight: 'bold' }
+            }
+          }
+        },
+        plugins: [ChartDataLabels]
+      });
+    }
+
+    // 自動初期描画
+    window.onload = generateChart;
+
+    // --- タイマー処理 ---
+    let timer = null;
+    let timeLeft = 25 * 60;
+    let isRunning = false;
+    let sessionCount = 0;
+    let mode = "work";
+
+    const display = document.getElementById("timerDisplay");
+    const status = document.getElementById("status");
+
+    function updateDisplay() {
+      const m = String(Math.floor(timeLeft / 60)).padStart(2, '0');
+      const s = String(timeLeft % 60).padStart(2, '0');
+      display.textContent = `${m}:${s}`;
+    }
+
+    function setMode(newMode) {
+      mode = newMode;
+      switch (mode) {
+        case "work":
+          timeLeft = 25 * 60;
+          status.textContent = "作業中";
+          break;
+        case "shortBreak":
+          timeLeft = 5 * 60;
+          status.textContent = "休憩中（短）";
+          break;
+        case "longBreak":
+          timeLeft = 15 * 60;
+          status.textContent = "休憩中（長）";
+          break;
+      }
+      updateDisplay();
+    }
+
+    function startTimer() {
+      if (isRunning) return;
+      isRunning = true;
+      timer = setInterval(() => {
+        timeLeft--;
+        updateDisplay();
+        if (timeLeft <= 0) {
+          clearInterval(timer);
+          isRunning = false;
+          if (mode === "work") {
+            sessionCount++;
+            setMode(sessionCount % 4 === 0 ? "longBreak" : "shortBreak");
+          } else {
+            setMode("work");
+          }
+          startTimer(); // 自動で次へ
+        }
+      }, 1000);
+    }
+
+    function stopTimer() {
+      clearInterval(timer);
+      isRunning = false;
+    }
+
+    function resetTimer() {
+      stopTimer();
+      setMode("work");
+      sessionCount = 0;
+    }
+
+    // 初期モード設定
+    setMode("work");
+  </script>
+</body>
+</html>
