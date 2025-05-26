@@ -5,197 +5,262 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>日課グラフ & ポモドーロタイマー</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
   <style>
+    :root {
+      --bg: #1e1e1e;
+      --text: #eeeeee;
+      --border: #444444;
+      --accent: #66b2ff;
+    }
+
+    body.light {
+      --bg: #ffffff;
+      --text: #111111;
+      --border: #cccccc;
+      --accent: #007bff;
+    }
+
     body {
       font-family: sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
       padding: 1rem;
-      max-width: 900px;
-      margin: auto;
+      transition: background 0.3s, color 0.3s;
     }
-    textarea {
-      width: 100%;
-      height: 120px;
-      font-size: 1rem;
-      margin-bottom: 1rem;
-    }
-    button {
+
+    .mode-toggle {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
       padding: 0.5rem 1rem;
-      font-size: 1rem;
-      margin: 0.3rem;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
     }
-    .layout {
+
+    .container {
       display: flex;
       flex-wrap: wrap;
       gap: 1rem;
       justify-content: space-between;
+      margin-top: 3rem;
     }
-    .left, .right {
-      flex: 1 1 300px;
+
+    .column {
+      flex: 1 1 30%;
       min-width: 280px;
-    }
-    canvas {
-      max-width: 100%;
-    }
-    .timer-box {
+      background: var(--bg);
       padding: 1rem;
-      border: 1px solid #ccc;
+      border: 1px solid var(--border);
       border-radius: 8px;
     }
-    #timerDisplay {
-      font-size: 2rem;
-      text-align: center;
+
+    .column h2 {
+      margin-top: 0;
+    }
+
+    .entry {
+      display: flex;
+      gap: 0.5rem;
       margin-bottom: 0.5rem;
     }
-    #status {
+
+    .entry input[type="time"],
+    .entry input[type="text"] {
+      flex: 1;
+      padding: 0.3rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .entry button {
+      padding: 0.3rem 0.5rem;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .chart-container {
       text-align: center;
-      margin-bottom: 1rem;
-      font-weight: bold;
+    }
+
+    canvas {
+      margin: auto;
+      display: block;
+    }
+
+    .timer-display {
+      font-size: 2rem;
+      text-align: center;
+      margin: 1rem 0;
+    }
+
+    .timer-controls {
+      display: flex;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+
+    .timer-controls button {
+      padding: 0.5rem 1rem;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    @media (max-width: 900px) {
+      .container {
+        flex-direction: column;
+      }
     }
   </style>
 </head>
 <body>
-  <h2>日課グラフジェネレータ</h2>
-  <p>形式例：<code>5:00 睡眠</code> のように記入</p>
-  <textarea id="scheduleInput">5:00 睡眠
-12:00 ご飯と家事
-14:00 スラック返信
-16:00 面接
-17:30 スラック返信
-18:30 MTG</textarea>
-  <br />
-  <button onclick="generateChart()">グラフ生成</button>
-
-  <div class="layout">
-    <div class="left">
-      <canvas id="pieChart"></canvas>
-    </div>
-
-    <div class="right timer-box">
+  <button class="mode-toggle" onclick="toggleMode()">🌙/☀️</button>
+  <div class="container">
+    <!-- ポモドーロタイマー -->
+    <div class="column">
       <h2>ポモドーロタイマー</h2>
-      <div id="status">待機中</div>
-      <div id="timerDisplay">25:00</div>
-      <div style="text-align:center;">
+      <div class="timer-display" id="timerDisplay">25:00</div>
+      <div class="timer-controls">
         <button onclick="startTimer()">スタート</button>
         <button onclick="stopTimer()">ストップ</button>
         <button onclick="resetTimer()">リセット</button>
       </div>
     </div>
+
+    <!-- 円グラフ -->
+    <div class="column chart-container">
+      <h2>日課グラフ</h2>
+      <canvas id="clockChart" width="525" height="635"></canvas>
+    </div>
+
+    <!-- スケジュール入力 -->
+    <div class="column">
+      <h2>スケジュール入力</h2>
+      <div id="entries"></div>
+      <button onclick="addEntry()">＋ 行を追加</button>
+      <button onclick="generateChart()">グラフ生成</button>
+    </div>
   </div>
 
   <script>
-    // --- グラフ処理 ---
-    function parseTime(t) {
-      if (t === "24:00") return 24 * 60;
-      const [h, m] = t.split(":").map(Number);
-      return h * 60 + (m || 0);
+    function toggleMode() {
+      document.body.classList.toggle('light');
     }
 
+    function addEntry(time = '', task = '') {
+      const entryDiv = document.createElement('div');
+      entryDiv.className = 'entry';
+      entryDiv.innerHTML = `
+        <input type="time" value="${time}" />
+        <input type="text" placeholder="行動内容" value="${task}" />
+        <button onclick="removeEntry(this)">🗑️</button>
+      `;
+      const entriesContainer = document.getElementById('entries');
+      if (entriesContainer) {
+        entriesContainer.appendChild(entryDiv);
+      }
+    }
+
+    function removeEntry(button) {
+      button.parentElement.remove();
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      addEntry('05:00', '睡眠');
+      addEntry('12:00', 'ご飯と家事');
+      addEntry('14:00', 'スラック返信');
+      addEntry('16:00', '面接');
+      addEntry('17:30', 'スラック返信');
+      addEntry('18:30', 'MTG');
+      updateTimerDisplay();
+    });
+
     function generateChart() {
-      const input = document.getElementById("scheduleInput").value.trim().split("\n");
+      const entries = document.querySelectorAll('#entries .entry');
       const times = [];
       const labels = [];
 
-      for (let line of input) {
-        if (!line.trim()) continue;
-        const [time, ...rest] = line.trim().split(" ");
-        times.push(parseTime(time));
-        labels.push(rest.join(" "));
+      entries.forEach(entry => {
+        const time = entry.querySelector('input[type="time"]').value;
+        const task = entry.querySelector('input[type="text"]').value;
+        if (time && task) {
+          times.push(time);
+          labels.push(task);
+        }
+      });
+
+      if (times.length === 0) return;
+
+      const minutes = times.map(t => {
+        const [h, m] = t.split(':').map(Number);
+        return h * 60 + m;
+      });
+
+      const combined = minutes.map((m, i) => ({ time: m, label: labels[i] }));
+      combined.sort((a, b) => a.time - b.time);
+      combined.push({ time: 24 * 60, label: '未入力' });
+
+      const data = [];
+      const chartLabels = [];
+      for (let i = 0; i < combined.length - 1; i++) {
+        const duration = combined[i + 1].time - combined[i].time;
+        data.push(duration);
+        chartLabels.push(`${combined[i].label}（${Math.floor(duration / 60)}h${duration % 60 ? (duration % 60) + 'm' : ''}）`);
       }
 
-      times.push(parseTime("24:00"));
-
-      const durations = [];
-      const newLabels = [];
-
-      for (let i = 0; i < labels.length; i++) {
-        const duration = times[i + 1] - times[i];
-        durations.push(duration);
-        newLabels.push(`${labels[i]}（${Math.floor(duration / 60)}h${duration % 60 ? (duration % 60) + 'm' : ''}）`);
-      }
-
-      const ctx = document.getElementById("pieChart").getContext("2d");
+      const ctx = document.getElementById('clockChart').getContext('2d');
       if (window.chart) window.chart.destroy();
       window.chart = new Chart(ctx, {
-        type: 'pie',
+        responsive: false,
+        type: 'doughnut',
         data: {
-          labels: newLabels,
+          labels: chartLabels,
           datasets: [{
-            data: durations,
-            backgroundColor: durations.map((_, i) => `hsl(${i * 60 % 360}, 70%, 70%)`)
+            data: data,
+            backgroundColor: data.map((_, i) => `hsl(${i * 60 % 360}, 70%, 70%)`)
           }]
         },
         options: {
+          cutout: '70%',
           plugins: {
-            legend: { position: 'bottom' },
-            datalabels: {
-              formatter: (value, ctx) => {
-                return ctx.chart.data.labels[ctx.dataIndex];
-              },
-              color: '#000',
-              font: { weight: 'bold' }
-            }
+            legend: { position: 'bottom' }
           }
-        },
-        plugins: [ChartDataLabels]
+        }
       });
     }
 
-    // 自動初期描画
-    window.onload = generateChart;
-
-    // --- タイマー処理 ---
-    let timer = null;
+    let timer;
     let timeLeft = 25 * 60;
     let isRunning = false;
-    let sessionCount = 0;
-    let mode = "work";
 
-    const display = document.getElementById("timerDisplay");
-    const status = document.getElementById("status");
-
-    function updateDisplay() {
-      const m = String(Math.floor(timeLeft / 60)).padStart(2, '0');
-      const s = String(timeLeft % 60).padStart(2, '0');
-      display.textContent = `${m}:${s}`;
-    }
-
-    function setMode(newMode) {
-      mode = newMode;
-      switch (mode) {
-        case "work":
-          timeLeft = 25 * 60;
-          status.textContent = "作業中";
-          break;
-        case "shortBreak":
-          timeLeft = 5 * 60;
-          status.textContent = "休憩中（短）";
-          break;
-        case "longBreak":
-          timeLeft = 15 * 60;
-          status.textContent = "休憩中（長）";
-          break;
-      }
-      updateDisplay();
+    function updateTimerDisplay() {
+      const minutes = String(Math.floor(timeLeft / 60)).padStart(2, '0');
+      const seconds = String(timeLeft % 60).padStart(2, '0');
+      document.getElementById('timerDisplay').textContent = `${minutes}:${seconds}`;
     }
 
     function startTimer() {
       if (isRunning) return;
       isRunning = true;
       timer = setInterval(() => {
-        timeLeft--;
-        updateDisplay();
         if (timeLeft <= 0) {
           clearInterval(timer);
           isRunning = false;
-          if (mode === "work") {
-            sessionCount++;
-            setMode(sessionCount % 4 === 0 ? "longBreak" : "shortBreak");
-          } else {
-            setMode("work");
-          }
-          startTimer(); // 自動で次へ
+          return;
         }
+        timeLeft--;
+        updateTimerDisplay();
       }, 1000);
     }
 
@@ -206,12 +271,9 @@
 
     function resetTimer() {
       stopTimer();
-      setMode("work");
-      sessionCount = 0;
+      timeLeft = 25 * 60;
+      updateTimerDisplay();
     }
-
-    // 初期モード設定
-    setMode("work");
   </script>
 </body>
 </html>
